@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Interactive Weather Dashboard</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="app-header">
+      <h1 class="logo">Weather<span>Dash</span></h1>
+      <div class="controls">
+        <button id="geoBtn" title="Use my location">📍 My location</button>
+        <div class="unit-toggle">
+          <label class="switch">
+            <input type="checkbox" id="unitToggle" />
+            <span class="slider"></span>
+          </label>
+          <small id="unitLabel">°C</small>
+        </div>
+      </div>
+    </header>
+
+    <section class="search">
+      <input id="cityInput" placeholder="Search city (e.g. Mumbai)" spellcheck="false" />
+      <button id="searchBtn">Search</button>
+    </section>
+
+    <section id="card" class="card hidden">
+      <div id="loader" class="loader hidden"></div>
+
+      <div class="current">
+        <div class="left">
+          <h2 id="cityName">—</h2>
+          <p id="dateTime" class="muted">—</p>
+          <p id="description" class="desc">—</p>
+          <div class="temps">
+            <div class="temp-main">
+              <img id="weatherIcon" src="" alt="" />
+              <span id="temp">--°</span>
+            </div>
+            <div class="temp-sub">
+              <span id="feelsLike">Feels like: --°</span>
+              <span id="humidity">Humidity: --%</span>
+              <span id="wind">Wind: -- m/s</span>
+            </div>
+          </div>
+        </div>
+        <div class="right">
+          <div id="more" class="more">
+            <p>Sunrise: <span id="sunrise">--:--</span></p>
+            <p>Sunset: <span id="sunset">--:--</span></p>
+            <p>Pressure: <span id="pressure">-- hPa</span></p>
+          </div>
+        </div>
+      </div>
+
+      <hr />
+
+      <div class="forecast" id="forecast">
+        <!-- daily forecast cards inserted here -->
+      </div>
+    </section>
+
+    <footer class="credits">
+      <small>Data from OpenWeather • Built with HTML, CSS & JS</small>
+    </footer>
+  </main>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
