@@ -1,269 +1,187 @@
-/* Interactive Weather Dashboard
-   - Replace YOUR_API_KEY_HERE with your OpenWeatherMap API key
-*/
+const API_KEY = '5a2db3de5f3e60ecfedda7cc872abfc5'; // <-- put your key here
 
-const API_KEY = "5a2db3de5f3e60ecfedda7cc872abfc5"; // <<<--- put your API key here
+  /* Utilities */
+  const $ = id => document.getElementById(id);
+  const kelvinToC = k => k - 273.15;
+  const cToF = c => (c * 9/5) + 32;
+  const round = (n, d=1) => Math.round(n * Math.pow(10,d)) / Math.pow(10,d);
 
-// Elements
-const cityInput = document.getElementById("cityInput");
-const searchBtn = document.getElementById("searchBtn");
-const geoBtn = document.getElementById("geoBtn");
-const card = document.getElementById("card");
-const loader = document.getElementById("loader");
-const cityName = document.getElementById("cityName");
-const dateTime = document.getElementById("dateTime");
-const descriptionEl = document.getElementById("description");
-const weatherIcon = document.getElementById("weatherIcon");
-const tempEl = document.getElementById("temp");
-const feelsLikeEl = document.getElementById("feelsLike");
-const humidityEl = document.getElementById("humidity");
-const windEl = document.getElementById("wind");
-const sunriseEl = document.getElementById("sunrise");
-const sunsetEl = document.getElementById("sunset");
-const pressureEl = document.getElementById("pressure");
-const forecastEl = document.getElementById("forecast");
-const unitToggle = document.getElementById("unitToggle");
-const unitLabel = document.getElementById("unitLabel");
+  /* State */
+  let unit = 'C';
+  let debounceTimer = null;
 
-// Persisted settings
-const storage = window.localStorage;
-let unit = storage.getItem("unit") || "metric"; // metric = Celsius, imperial = Fahrenheit
-unitToggle.checked = unit === "imperial";
-unitLabel.textContent = unit === "metric" ? "°C" : "°F";
+  /* Elements */
+  const q = $('q');
+  const searchBtn = $('searchBtn');
+  const locBtn = $('locBtn');
+  const unitBtn = $('unitBtn');
+  const recentEl = $('recent');
+  const errorEl = $('error');
+  const loader = $('loader');
+  const currentBlock = $('currentBlock');
 
-let lastCity = storage.getItem("lastCity") || "";
+  const locName = $('locName');
+  const coords = $('coords');
+  const tempNow = $('tempNow');
+  const desc = $('desc');
+  const iconNow = $('iconNow');
+  const tempLarge = $('tempLarge');
+  const feels = $('feels');
+  const hum = $('hum');
+  const wind = $('wind');
+  const pres = $('pres');
+  const vis = $('vis');
+  const outlook = $('outlook');
 
-// Helper: show & hide loader
-function showLoader(show = true) {
-  loader.classList.toggle("hidden", !show);
-}
-
-// Helper: format unix timestamp to HH:MM (local)
-function formatTime(ts, tzOffset = 0) {
-  // ts is in seconds, tzOffset in seconds
-  const d = new Date((ts + tzOffset) * 1000);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-// Helper: get weekday name
-function weekdayName(ts, tzOffset = 0) {
-  const d = new Date((ts + tzOffset) * 1000);
-  return d.toLocaleDateString(undefined, { weekday: "short" });
-}
-
-// Background by weather
-function setBackground(condition) {
-  const body = document.body;
-  // condition -> main weather text like 'Clear', 'Clouds', 'Rain', etc.
-  let gradient;
-  switch ((condition || "").toLowerCase()) {
-    case "clear":
-      gradient = "linear-gradient(180deg,#0b3a66 0%, #0f1724 100%)";
-      break;
-    case "clouds":
-      gradient = "linear-gradient(180deg,#2b3a4a 0%, #0f1724 100%)";
-      break;
-    case "rain":
-    case "drizzle":
-      gradient = "linear-gradient(180deg,#1b2a35 0%, #071524 100%)";
-      break;
-    case "thunderstorm":
-      gradient = "linear-gradient(180deg,#341f3f 0%, #071024 100%)";
-      break;
-    case "snow":
-      gradient = "linear-gradient(180deg,#2b3b4b 0%, #8eaec6 60%)";
-      break;
-    default:
-      gradient = "linear-gradient(180deg,#071024 0%, #0f1724 60%)";
+  /* Recent searches */
+  function loadRecent(){
+    try{ return JSON.parse(localStorage.getItem('weather:recent')||'[]'); }catch{ return []; }
   }
-  body.style.background = gradient;
-}
-
-// Fetch weather by coordinates (get current + daily forecast via One Call)
-async function fetchWeatherByCoords(lat, lon, units = unit) {
-  if (!API_KEY || API_KEY === "YOUR_API_KEY_HERE") {
-    throw new Error("Please set your OpenWeather API key in script.js (API_KEY).");
+  function saveRecent(list){ localStorage.setItem('weather:recent', JSON.stringify(list.slice(0,6))); }
+  function renderRecent(){
+    const list = loadRecent();
+    recentEl.innerHTML = '';
+    if(list.length===0){ recentEl.innerHTML = '<div class="small" style="color:#94a3b8">No recent searches</div>'; return; }
+    list.forEach(city => {
+      const b = document.createElement('button'); b.className='chip'; b.textContent = city; b.onclick = () => { q.value=city; fetchByCity(city); }
+      recentEl.appendChild(b);
+    });
   }
 
-  // current weather (for name & timezone offset) - use /weather endpoint for city name
-  const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=${units}&appid=${API_KEY}`;
-  const weatherResp = await fetch(weatherUrl);
-  if (!weatherResp.ok) throw new Error("Unable to fetch weather (current).");
-  const weatherData = await weatherResp.json();
-
-  const onecallUrl = `https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&units=${units}&exclude=minutely,hourly,alerts&appid=${API_KEY}`;
-  const onecallResp = await fetch(onecallUrl);
-  if (!onecallResp.ok) throw new Error("Unable to fetch forecast.");
-  const onecallData = await onecallResp.json();
-
-  // merge essential pieces
-  return {
-    currentWeather: weatherData,
-    onecall: onecallData
-  };
-}
-
-// Fetch weather by city name
-async function fetchWeatherByCity(cityNameStr, units = unit) {
-  if (!API_KEY || API_KEY === "YOUR_API_KEY_HERE") {
-    throw new Error("Please set your OpenWeather API key in script.js (API_KEY).");
+  function addRecent(city){
+    const list = loadRecent();
+    const nxt = [city, ...list.filter(x=>x.toLowerCase()!==city.toLowerCase())];
+    saveRecent(nxt);
+    renderRecent();
   }
 
-  const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(cityNameStr)}&units=${units}&appid=${API_KEY}`;
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    if (resp.status === 404) throw new Error("City not found. Try a different name.");
-    throw new Error("Unable to fetch weather.");
+  /* UI helpers */
+  function showError(msg){ errorEl.style.display='block'; errorEl.textContent = msg; }
+  function clearError(){ errorEl.style.display='none'; errorEl.textContent=''; }
+  function showLoader(){ loader.style.display='flex'; }
+  function hideLoader(){ loader.style.display='none'; }
+
+  function displayTempK(k){
+    const c = kelvinToC(k);
+    if(unit==='C') return `${round(c,1)}°C`;
+    return `${round(cToF(c),1)}°F`;
   }
-  const data = await resp.json();
-  // now fetch onecall by coords
-  const { coord } = data;
-  const onecallUrl = `https://api.openweathermap.org/data/2.5/onecall?lat=${coord.lat}&lon=${coord.lon}&units=${units}&exclude=minutely,hourly,alerts&appid=${API_KEY}`;
-  const onecallResp = await fetch(onecallUrl);
-  if (!onecallResp.ok) throw new Error("Unable to fetch forecast.");
-  const onecallData = await onecallResp.json();
 
-  return {
-    currentWeather: data,
-    onecall: onecallData
-  };
-}
+  /* Fetching */
+  async function fetchByCity(cityName){
+    clearError(); showLoader(); currentBlock.style.display='none';
+    try{
+      const cwRes = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(cityName)}&appid=${API_KEY}`);
+      if(!cwRes.ok) throw new Error('City not found');
+      const cw = await cwRes.json();
+      renderCurrent(cw);
 
-// Render UI
-function renderAll(payload) {
-  const { currentWeather, onecall } = payload;
-  card.classList.remove("hidden");
+      const foRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(cityName)}&appid=${API_KEY}`);
+      if(!foRes.ok) throw new Error('Forecast not available');
+      const fo = await foRes.json();
+      const daily = summarizeForecast(fo.list);
+      renderForecast(daily);
+      addRecent(cw.name);
+    }catch(err){
+      console.error(err); showError(err.message || 'Failed to fetch weather');
+    }finally{ hideLoader(); }
+  }
 
-  const tzOffset = (onecall.timezone_offset || 0); // seconds
-  const now = new Date();
-  cityName.textContent = `${currentWeather.name}, ${currentWeather.sys?.country || ""}`;
-  dateTime.textContent = now.toLocaleString();
-  descriptionEl.textContent = currentWeather.weather?.[0]?.description || "";
-  const iconCode = currentWeather.weather?.[0]?.icon;
-  weatherIcon.src = iconCode ? `https://openweathermap.org/img/wn/${iconCode}@2x.png` : "";
-  weatherIcon.alt = currentWeather.weather?.[0]?.main || "weather";
+  async function fetchByCoords(lat, lon){
+    clearError(); showLoader(); currentBlock.style.display='none';
+    try{
+      const cwRes = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}`);
+      if(!cwRes.ok) throw new Error('Location weather not found');
+      const cw = await cwRes.json(); renderCurrent(cw);
 
-  const tempVal = Math.round(currentWeather.main.temp);
-  tempEl.textContent = `${tempVal}°`;
-  feelsLikeEl.textContent = `Feels like: ${Math.round(currentWeather.main.feels_like)}°`;
-  humidityEl.textContent = `Humidity: ${currentWeather.main.humidity}%`;
-  windEl.textContent = `Wind: ${currentWeather.wind.speed} m/s`;
-  sunriseEl.textContent = formatTime(currentWeather.sys.sunrise, tzOffset);
-  sunsetEl.textContent = formatTime(currentWeather.sys.sunset, tzOffset);
-  pressureEl.textContent = `${currentWeather.main.pressure} hPa`;
+      const foRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${API_KEY}`);
+      if(!foRes.ok) throw new Error('Forecast not available');
+      const fo = await foRes.json(); renderForecast(summarizeForecast(fo.list));
+      addRecent(cw.name);
+    }catch(err){ console.error(err); showError(err.message || 'Failed to fetch weather'); }
+    finally{ hideLoader(); }
+  }
 
-  // background
-  setBackground(currentWeather.weather?.[0]?.main);
+  function renderCurrent(cw){
+    locName.textContent = `${cw.name}${cw.sys && cw.sys.country ? ', '+cw.sys.country : ''}`;
+    coords.textContent = `Lat ${round(cw.coord.lat,2)} • Lon ${round(cw.coord.lon,2)}`;
+    tempNow.textContent = displayTempK(cw.main.temp);
+    desc.textContent = cw.weather[0].description;
+    iconNow.src = `https://openweathermap.org/img/wn/${cw.weather[0].icon}@2x.png`;
+    iconNow.alt = cw.weather[0].description || '';
+    tempLarge.textContent = displayTempK(cw.main.temp);
+    feels.textContent = `Feels like ${displayTempK(cw.main.feels_like)}`;
+    hum.textContent = `${cw.main.humidity}%`;
+    wind.textContent = `${cw.wind.speed} m/s`;
+    pres.textContent = `${cw.main.pressure} hPa`;
+    vis.textContent = `${(cw.visibility||0)/1000} km`;
+    currentBlock.style.display='block';
+  }
 
-  // Forecast (daily) - use onecall.daily (first 7 days)
-  forecastEl.innerHTML = "";
-  const daily = onecall.daily || [];
-  daily.slice(0, 7).forEach(day => {
-    const dName = weekdayName(day.dt, tzOffset);
-    const icon = day.weather?.[0]?.icon;
-    const min = Math.round(day.temp.min);
-    const max = Math.round(day.temp.max);
-    const card = document.createElement("div");
-    card.className = "day";
-    card.innerHTML = `
-      <div class="day-name">${dName}</div>
-      <img src="https://openweathermap.org/img/wn/${icon}@2x.png" alt="${day.weather?.[0]?.main || ''}" />
-      <div class="minmax">${max}° / ${min}°</div>
-      <div class="muted" style="color:var(--muted);font-size:12px; margin-top:6px;">${day.weather?.[0]?.main}</div>
-    `;
-    forecastEl.appendChild(card);
+  function summarizeForecast(list){
+    const days = {};
+    list.forEach(item => {
+      const d = new Date(item.dt * 1000);
+      const key = d.toISOString().slice(0,10);
+      if(!days[key]) days[key]=[];
+      days[key].push(item);
+    });
+    return Object.keys(days).slice(0,6).map(dateKey => {
+      const items = days[dateKey];
+      // pick item closest to 12:00 localtime
+      let midday = items.reduce((a,b)=> Math.abs((new Date(a.dt*1000)).getUTCHours()-12) < Math.abs((new Date(b.dt*1000)).getUTCHours()-12) ? a : b);
+      const temps = items.map(i=>i.main.temp);
+      const min = Math.min(...temps);
+      const max = Math.max(...temps);
+      const freq = {}; items.forEach(i=>{ const w=i.weather[0].main; freq[w]=(freq[w]||0)+1; });
+      const common = Object.keys(freq).reduce((a,b)=> freq[a]>freq[b]?a:b);
+      return { date: dateKey, label: new Date(dateKey).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}), tempMin: min, tempMax: max, icon: midday.weather[0].icon, description: midday.weather[0].description, main: common };
+    });
+  }
+
+  function renderForecast(daily){
+    outlook.innerHTML='';
+    daily.slice(0,5).forEach(d => {
+      const el = document.createElement('div'); el.className='day';
+      el.innerHTML = `<small>${d.label}</small><img src="https://openweathermap.org/img/wn/${d.icon}@2x.png" alt="${d.description}" style="width:64px;height:64px;display:block;margin:6px auto" /><div class="range">${formatRange(d.tempMax,d.tempMin)}</div><div class="small" style="text-transform:capitalize">${d.description}</div>`;
+      outlook.appendChild(el);
+    });
+  }
+
+  function formatRange(maxK,minK){
+    if(unit==='C') return `${round(kelvinToC(maxK),1)}° / ${round(kelvinToC(minK),1)}°`;
+    return `${round(cToF(kelvinToC(maxK)),1)}° / ${round(cToF(kelvinToC(minK)),1)}°`;
+  }
+
+  /* Event wiring */
+  q.addEventListener('input', (e)=>{
+    clearError();
+    clearTimeout(debounceTimer);
+    const v = e.target.value;
+    if(!v || v.trim().length<2) return;
+    debounceTimer = setTimeout(()=>{ fetchByCity(v.trim()); }, 650);
   });
-}
+  searchBtn.addEventListener('click', ()=>{ const v=q.value.trim(); if(v) fetchByCity(v); });
 
-// Search handler
-async function handleSearch(city) {
-  try {
-    showLoader(true);
-    const data = await fetchWeatherByCity(city);
-    renderAll(data);
-    storage.setItem("lastCity", city);
-  } catch (err) {
-    alert(err.message || "Error fetching weather");
-  } finally {
-    showLoader(false);
-  }
-}
-
-// Geolocation handler
-async function handleGeolocation() {
-  if (!navigator.geolocation) {
-    alert("Geolocation is not supported by your browser.");
-    return;
-  }
-  showLoader(true);
-  navigator.geolocation.getCurrentPosition(async (pos) => {
-    try {
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const data = await fetchWeatherByCoords(lat, lon);
-      renderAll(data);
-      storage.setItem("lastCity", `${data.currentWeather.name}`);
-    } catch (err) {
-      alert(err.message || "Error fetching weather for location.");
-    } finally {
-      showLoader(false);
+  unitBtn.addEventListener('click', ()=>{
+    unit = unit==='C' ? 'F' : 'C'; unitBtn.textContent = '°' + unit;
+    // update UI values if present
+    const currentTempText = tempNow.textContent;
+    // re-render entire page by re-calling search with current location if possible
+    // simplest: if locName has value, use it
+    const name = locName.textContent; if(name && name!=='—'){
+      // try to fetch again using displayed city (non-blocking)
+      // If API key missing, this will show error
+      fetchByCity(name.split(',')[0]);
     }
-  }, (err) => {
-    showLoader(false);
-    alert("Unable to get your location: " + (err.message || "Permission denied"));
-  }, { timeout: 10000 });
-}
+  });
 
-// Unit toggle
-unitToggle.addEventListener("change", () => {
-  unit = unitToggle.checked ? "imperial" : "metric";
-  unitLabel.textContent = unit === "metric" ? "°C" : "°F";
-  storage.setItem("unit", unit);
-  // re-run last search if any
-  const city = storage.getItem("lastCity");
-  if (city) {
-    // re-fetch with new unit; do not ask user
-    (async () => {
-      showLoader(true);
-      try {
-        const data = await fetchWeatherByCity(city, unit);
-        renderAll(data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        showLoader(false);
-      }
-    })();
-  }
-});
+  locBtn.addEventListener('click', ()=>{
+    if(!navigator.geolocation){ showError('Geolocation not supported by this browser.'); return; }
+    showLoader(); navigator.geolocation.getCurrentPosition(pos=>{ fetchByCoords(pos.coords.latitude, pos.coords.longitude); }, err=>{ showError('Permission denied or location unavailable.'); hideLoader(); });
+  });
 
-searchBtn.addEventListener("click", () => {
-  const val = cityInput.value.trim();
-  if (!val) return;
-  handleSearch(val);
-});
-cityInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") searchBtn.click();
-});
-geoBtn.addEventListener("click", () => handleGeolocation());
-
-// On load: try last city
-window.addEventListener("load", async () => {
-  if (!API_KEY || API_KEY === "YOUR_API_KEY_HERE") {
-    // show card hidden but give clear instruction overlay
-    card.classList.add("hidden");
-    alert("Please add your OpenWeather API key in script.js (API_KEY) to enable fetching weather data.");
-    return;
-  }
-  if (lastCity) {
-    showLoader(true);
-    try {
-      const data = await fetchWeatherByCity(lastCity);
-      renderAll(data);
-    } catch (err) {
-      console.warn("Failed to load last city:", err);
-    } finally {
-      showLoader(false);
-    }
-  }
-});
+  // init
+  renderRecent();
+  // load a friendly default city if nothing done
+  window.addEventListener('load', ()=>{ if(!loadRecent().length){ fetchByCity('New Delhi'); } });
